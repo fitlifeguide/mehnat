@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ur-Latn">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mehnat</title>
+<style>
+:root{--bg:#f2f6f3;--ink:#10231c;--mute:#5d716a;--card:#fff;--line:#d5ded9;--green:#0f7b4f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,sans-serif;line-height:1.45}
+main{max-width:480px;margin:0 auto;padding:16px 16px 40px}
+.bal{background:var(--green);color:#fff;border-radius:20px;padding:22px 20px;margin:12px 0}
+.bal .n{font-size:2.6rem;font-weight:800}
+.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+label{display:block;font-size:.85rem;color:var(--mute);margin:10px 0 4px}
+input,select,button{font:inherit;padding:10px;border-radius:8px;border:1px solid var(--line);width:100%}
+button{background:var(--green);color:#fff;border:0;font-weight:600;margin-top:10px;cursor:pointer}
+button.s{width:auto;padding:6px 10px;margin:0}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.9rem}
+.msg{font-size:.85rem;color:#b3261e;min-height:1.2em}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main>
+<h2>Mehnat</h2>
+
+<!-- Login -->
+<section id="auth" class="box hide">
+  <label for="em">Email</label><input id="em" type="email" autocomplete="email">
+  <label for="pw">Password (kam az kam 6 characters)</label><input id="pw" type="password" autocomplete="current-password">
+  <button id="login">Login</button>
+  <button id="signup" style="background:#5d716a">Naya account banayen</button>
+  <div class="msg" id="amsg" role="status"></div>
+</section>
+
+<!-- User -->
+<section id="user" class="hide">
+  <div class="bal"><small>Aap ka balance</small><div class="n" id="bal">PKR 0</div></div>
+  <div class="box">
+    <b>Paise nikalein</b>
+    <label for="m">Method</label><select id="m"><option>Easypaisa</option><option>JazzCash</option></select>
+    <label for="num">Account number</label><input id="num" inputmode="numeric" maxlength="11" placeholder="03001234567">
+    <label for="nm">Account par naam</label><input id="nm">
+    <label for="amt">Raqam (kam az kam PKR 500)</label><input id="amt" type="number" min="500">
+    <button id="wd">Request bhejein</button>
+    <div class="msg" id="msg" role="status"></div>
+  </div>
+  <div class="box"><b>Meri requests</b><div id="hist"></div></div>
+  <button id="out" style="background:#5d716a">Logout</button>
+</section>
+
+<!-- Admin -->
+<section id="admin" class="hide">
+  <div class="box"><b>Pending withdrawals</b><div id="pend"></div></div>
+  <div class="box">
+    <b>User ko balance dein</b>
+    <label for="cu">User ki email</label><input id="cu" type="email" placeholder="user@gmail.com">
+    <label for="ca">Raqam (PKR)</label><input id="ca" type="number">
+    <button id="cr">Balance add karein</button>
+    <div class="msg" id="cmsg" role="status"></div>
+  </div>
+  <button id="out2" style="background:#5d716a">Logout</button>
+</section>
+</main>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, addDoc, updateDoc, collection, query, where, getDocs, onSnapshot, increment, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+/* 1) Firebase console se apna config yahan paste karein */
+const firebaseConfig = {
+  apiKey: "AIzaSyCHpyJ_G8eRU3qGRYKGtdBSpvUyKVzZ7kI",
+  authDomain: "mehnat-app-78662.firebaseapp.com",
+  projectId: "mehnat-app-78662",
+  appId: "1:105078995955:web:42b60c4ce68595a75f3086"
+};
+/* 2) Apna admin UID (pehle account banayen, phir Authentication page se UID copy karein) */
+const ADMIN_UID = "oDQcNnrx8lThR1pQq3ef8X4vH6c2";
+const MIN = 500;
+
+const app = initializeApp(firebaseConfig), auth = getAuth(app), db = getFirestore(app);
+const $ = id => document.getElementById(id);
+const show = id => ["auth","user","admin"].forEach(s => $(s).classList.toggle("hide", s !== id));
+let unsubs = [];
+const clean = () => { unsubs.forEach(u => u()); unsubs = []; };
+
+$("login").onclick = () => signInWithEmailAndPassword(auth, $("em").value, $("pw").value).catch(e => $("amsg").textContent = "Login nahi hua: email ya password check karein.");
+$("signup").onclick = async () => {
+  try {
+    const c = await createUserWithEmailAndPassword(auth, $("em").value, $("pw").value);
+    await setDoc(doc(db, "users", c.user.uid), { email: c.user.email, balance: 0 });
+  } catch (e) { $("amsg").textContent = "Account nahi bana: email sahi likhein, password 6+ characters ka ho."; }
+};
+$("out").onclick = () => signOut(auth);
+$("out2").onclick = () => signOut(auth);
+
+onAuthStateChanged(auth, async u => {
+  clean();
+  if (!u) return show("auth");
+  if (u.uid === ADMIN_UID) { show("admin"); return adminView(); }
+  show("user"); userView(u);
+});
+
+function userView(u) {
+  unsubs.push(onSnapshot(doc(db, "users", u.uid), s => $("bal").textContent = "PKR " + (s.data()?.balance ?? 0)));
+  unsubs.push(onSnapshot(query(collection(db, "withdrawals"), where("uid", "==", u.uid)), s => {
+    $("hist").innerHTML = s.docs.map(d => d.data()).map(r =>
+      `<div class="row"><span>${r.method} • ${r.number}</span><b>PKR ${r.amount} (${r.status})</b></div>`).join("") || "Abhi koi request nahi.";
+  }));
+  $("wd").onclick = async () => {
+    const num = $("num").value.trim(), nm = $("nm").value.trim(), amt = parseInt($("amt").value, 10);
+    if (!/^03\d{9}$/.test(num)) return $("msg").textContent = "Number 03 se shuru ho, 11 digits ka.";
+    if (nm.length < 3) return $("msg").textContent = "Account par jo naam hai wo likhein.";
+    if (!(amt >= MIN)) return $("msg").textContent = "Kam az kam PKR " + MIN + ".";
+    try {
+      await addDoc(collection(db, "withdrawals"), { uid: u.uid, method: $("m").value, number: num, name: nm, amount: amt, status: "pending", at: serverTimestamp() });
+      $("msg").style.color = "#0f7b4f"; $("msg").textContent = "Request bhej di gayi.";
+    } catch (e) { $("msg").style.color = "#b3261e"; $("msg").textContent = "Balance kam hai ya request nahi gayi."; }
+  };
+}
+
+function adminView() {
+  unsubs.push(onSnapshot(query(collection(db, "withdrawals"), where("status", "==", "pending")), s => {
+    $("pend").innerHTML = "";
+    s.docs.forEach(d => {
+      const r = d.data(), row = document.createElement("div"); row.className = "row";
+      row.innerHTML = `<span>${r.method} ${r.number}<br>${r.name} • UID ${r.uid.slice(0,6)}</span><b>PKR ${r.amount}</b>`;
+      const b = document.createElement("button"); b.className = "s"; b.textContent = "Paid kar diya";
+      b.onclick = async () => {
+        const w = writeBatch(db);
+        w.update(d.ref, { status: "paid" });
+        w.update(doc(db, "users", r.uid), { balance: increment(-r.amount) });
+        await w.commit();
+      };
+      row.appendChild(b); $("pend").appendChild(row);
+    });
+    if (!s.size) $("pend").textContent = "Koi pending request nahi.";
+  }));
+  $("cr").onclick = async () => {
+    const em = $("cu").value.trim().toLowerCase(), a = parseInt($("ca").value, 10);
+    if (!em || !(a > 0)) return $("cmsg").textContent = "Email aur raqam likhein.";
+    try {
+      const r = await getDocs(query(collection(db, "users"), where("email", "==", em)));
+      if (r.empty) return $("cmsg").textContent = "Is email ka user nahi mila.";
+      await updateDoc(r.docs[0].ref, { balance: increment(a) });
+      $("cmsg").textContent = "Add ho gaya.";
+    } catch (e) { $("cmsg").textContent = "Kuch masla aaya, dobara try karein."; }
+  };
+}
+</script>
+</body>
+</html>
