@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Withdraw - Mehnat</title>
+<style>
+  body{margin:0;padding:16px;background:#0b0b0b;color:#fff;font-family:system-ui,sans-serif}
+  .card{background:#161616;border:1px solid #3a3000;border-radius:14px;padding:16px;margin-bottom:14px}
+  h2{margin:0 0 6px}
+  label{display:block;font-size:13px;opacity:.8;margin:12px 0 4px}
+  input,select{width:100%;padding:12px;border-radius:10px;border:1px solid #444;background:#0f0f0f;color:#fff;font-size:15px;box-sizing:border-box}
+  button{width:100%;padding:14px;border:0;border-radius:12px;background:#f5b400;color:#000;font-size:16px;font-weight:700;margin-top:14px}
+  button:disabled{opacity:.5}
+  a{color:#f5b400}
+  .note{font-size:12px;opacity:.7}
+  #msg{text-align:center;min-height:22px;margin:10px 0}
+  .row{display:flex;justify-content:space-between;border-top:1px solid #2a2a2a;padding:8px 0;font-size:13px}
+</style>
+</head>
+<body>
+
+<p><a href="watch-1.html">← Watch Ads</a> &nbsp; <a href="index.html">Dashboard</a></p>
+
+<div class="card">
+  <h2>Coins: <span id="bal">0</span></h2>
+  <div style="font-size:22px;color:#f5b400;font-weight:700">≈ <span id="usdt">0.0000</span> USDT</div>
+  <div class="note" style="margin-top:6px">Minimum withdrawal: <b>5 USDT</b> (50,000 coins) · Kam az kam <b>25 ads</b> dekhe hon (<span id="ads">0</span>/25)</div>
+</div>
+
+<div class="card">
+  <h2>Withdraw USDT</h2>
+  <label>Network</label>
+  <select id="net">
+    <option value="TRC20">USDT (TRC20 / Tron)</option>
+    <option value="BEP20">USDT (BEP20 / BNB Chain)</option>
+  </select>
+  <label>Wallet address</label>
+  <input id="addr" placeholder="T... (TRC20) ya 0x... (BEP20)" autocomplete="off">
+  <label>Amount (USDT)</label>
+  <input id="amt" type="number" step="0.01" min="5" placeholder="5">
+  <button id="btn" disabled>Withdraw Request</button>
+  <div id="msg"></div>
+  <p class="note">Address aur network dobara check karein. Galat address par bheje gaye USDT wapas nahi aate. Requests manually process hoti hain, is mein kuch din lag sakte hain, aur payout ad kamai par munhasir hai.</p>
+</div>
+
+<div class="card">
+  <h2>History</h2>
+  <div id="hist" class="note">Abhi koi request nahi.</div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCHpyJ_G8eRU3qGRYKGtdBSpvUyKVzZ7kI",
+  authDomain: "mehnat-app-78662.firebaseapp.com",
+  projectId: "mehnat-app-78662",
+  storageBucket: "mehnat-app-78662.firebasestorage.app",
+  messagingSenderId: "105078995955",
+  appId: "1:105078995955:web:42b60c4ce68595a75f3086"
+};
+const LOGIN_PAGE = "index.html";
+const COINS_PER_USDT = 10000;
+const MIN_COINS = 50000;   // 5 USDT (rules mein bhi yehi hai)
+const MIN_ADS = 25;        // rules mein bhi yehi hai
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth(), db = firebase.firestore();
+const $ = id => document.getElementById(id);
+let user, wallet = null;
+
+auth.onAuthStateChanged(u => {
+  if (!u) { location.href = LOGIN_PAGE; return; }
+  user = u;
+  db.collection("wallets").doc(u.uid).onSnapshot(s => {
+    wallet = s.exists ? s.data() : null;
+    render();
+  });
+  db.collection("withdrawals").where("uid", "==", u.uid).onSnapshot(s => {
+    const rows = s.docs.map(d => d.data()).filter(d => d.type === "usdt")
+      .sort((a, b) => (b.createdAt ? b.createdAt.toMillis() : 0) - (a.createdAt ? a.createdAt.toMillis() : 0));
+    $("hist").innerHTML = rows.length ? rows.map(d =>
+      '<div class="row"><span>' + (d.coins / COINS_PER_USDT).toFixed(2) + ' USDT · ' + d.network +
+      '</span><span>' + d.status + '</span></div>').join("") : "Abhi koi request nahi.";
+  });
+});
+
+function render() {
+  const w = wallet || { balance: 0, adsWatched: 0 };
+  $("bal").textContent = w.balance.toLocaleString();
+  $("usdt").textContent = (w.balance / COINS_PER_USDT).toFixed(4);
+  $("ads").textContent = w.adsWatched;
+  $("btn").disabled = !wallet;
+}
+
+$("btn").onclick = async () => {
+  const msg = $("msg");
+  const net = $("net").value, addr = $("addr").value.trim();
+  const usdt = parseFloat($("amt").value);
+  const coins = Math.round(usdt * COINS_PER_USDT);
+  if (!wallet) return;
+  if (!(usdt > 0)) { msg.textContent = "Amount likhein."; return; }
+  if (coins < MIN_COINS) { msg.textContent = "Minimum 5 USDT hai."; return; }
+  if (coins > wallet.balance) { msg.textContent = "Balance kam hai."; return; }
+  if (wallet.adsWatched < MIN_ADS) { msg.textContent = "Pehle kam az kam " + MIN_ADS + " ads dekhein."; return; }
+  const okAddr = net === "TRC20" ? /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(addr) : /^0x[a-fA-F0-9]{40}$/.test(addr);
+  if (!okAddr) { msg.textContent = "Wallet address " + net + " ke hisab se sahi nahi."; return; }
+  if (!confirm("Withdraw " + (coins / COINS_PER_USDT) + " USDT to " + net + " address:\n" + addr + "\n\nYe sahi hai?")) return;
+
+  $("btn").disabled = true;
+  msg.textContent = "Bhej rahe hain...";
+  try {
+    const wRef = db.collection("withdrawals").doc();
+    const batch = db.batch();
+    batch.set(wRef, {
+      type: "usdt", uid: user.uid, email: user.email || "", coins: coins,
+      network: net, address: addr, status: "pending",
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    batch.update(db.collection("wallets").doc(user.uid), {
+      balance: firebase.firestore.FieldValue.increment(-coins),
+      lastWithdrawId: wRef.id
+    });
+    await batch.commit();
+    msg.textContent = "Request bhej di gayi ✅";
+    $("amt").value = "";
+  } catch (e) {
+    msg.textContent = "Request nahi gayi. Thori der baad try karein.";
+  }
+  $("btn").disabled = false;
+};
+</script>
+</body>
+</html>
