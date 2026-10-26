@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Watch Ads - Mehnat</title>
+<style>
+  body{margin:0;padding:16px;background:#0b0b0b;color:#fff;font-family:system-ui,sans-serif}
+  .card{background:#161616;border:1px solid #3a3000;border-radius:14px;padding:16px;margin-bottom:14px}
+  h2{margin:0 0 6px}
+  button{width:100%;padding:14px;border:0;border-radius:12px;background:#f5b400;color:#000;font-size:16px;font-weight:700}
+  button:disabled{opacity:.5}
+  #msg{text-align:center;min-height:22px;margin:10px 0}
+  .ad-box{text-align:center;margin:12px 0;overflow:hidden}
+  .ad-box p{font-size:12px;opacity:.6;margin:0 0 6px}
+</style>
+</head>
+<body>
+
+<div id="testBanner" hidden style="background:#5a0000;border:1px solid #ff4d4d;border-radius:12px;padding:10px;margin-bottom:14px;font-size:13px;text-align:center">⚠️ TEST MODE: ye demo balance hai, asli nahi. Is par koi withdrawal ya payout nahi hoga.</div>
+
+<div class="card">
+  <h2>Coins: <span id="bal">0</span></h2>
+  <div style="font-size:22px;color:#f5b400;font-weight:700">≈ <span id="usdt">0.0000</span> USDT</div>
+  <div style="font-size:12px;opacity:.7;margin:4px 0 8px">Rate: <span id="rate"></span> coins = 1 USDT</div>
+  <div>Ads today: <span id="cnt">0</span> / <span id="lim"></span></div>
+</div>
+
+<div class="card" id="bonusBox" hidden>
+  🎁 Welcome bonus: <span id="bonusAmt"></span> coins
+  <button id="claimBtn" style="margin-top:10px">Claim Now</button>
+</div>
+
+<button id="watchBtn" disabled>Watch Ad</button>
+<div id="msg"></div>
+<p style="font-size:12px;opacity:.7;text-align:center">USDT value upar diye gaye rate se andaza hai. Withdrawal minimum raqam par pohonchne ke baad hi hogi aur ad kamai par munhasir hai. Reward rates kisi bhi waqt badal sakte hain. Coins abhi kisi exchange par trade nahi ho rahe.</p>
+
+<!-- Native Banner (sirf ek baar) -->
+<div class="ad-box">
+  <p>ADVERTISEMENT</p>
+  <script async="async" data-cfasync="false" src="https://pl32033268.profitableratecpmnetwork.com/c5e6e3b98f47e50e96c97f8f06104473/invoke.js"></script>
+  <div id="container-c5e6e3b98f47e50e96c97f8f06104473"></div>
+</div>
+
+<!-- Banner 300x250 (sirf ek baar) -->
+<div class="ad-box">
+  <p>ADVERTISEMENT</p>
+  <script>
+    atOptions = {'key':'0167aae33cd9b93b1138fefd780272a0','format':'iframe','height':250,'width':300,'params':{}};
+  </script>
+  <script src="https://bicea.org/22/0167aae33cd9b93b1138fefd780272a0"></script>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script>
+// ====== SETTINGS ======
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyCHpyJ_G8eRU3qGRYKGtdBSpvUyKVzZ7kI",
+  authDomain: "mehnat-app-78662.firebaseapp.com",
+  projectId: "mehnat-app-78662",
+  storageBucket: "mehnat-app-78662.firebasestorage.app",
+  messagingSenderId: "105078995955",
+  appId: "1:105078995955:web:42b60c4ce68595a75f3086"
+};
+const SMARTLINK  = "https://www.profitableratecpmnetwork.com/piemznuk?key=048b1db90d608f862e21d63f96c3c9f4";
+const LOGIN_PAGE = "index.html";   // apne login page ka naam
+const REWARD = 100;   // coins per ad = 0.01 USDT (rules mein bhi yehi hai)
+const LIMIT  = 100;   // ads per 24 hours (rules mein bhi yehi hai)
+const WAIT   = 20;    // seconds timer
+const BONUS  = 2000;  // signup bonus coins (rules mein bhi yehi hai)
+const TEST_MODE = false;  // true = sirf demo (balance sirf aap ke phone mein, Firestore mein nahi). Live karte waqt false karein
+const TEST_REWARD = 500; // demo reward per ad (100 ads = 5 USDT demo)
+const COINS_PER_USDT = 10000; // 10,000 coins = 1 USDT (Adsterra kamai dekh kar badalte rahein)
+
+// ====== APP ======
+firebase.initializeApp(FIREBASE_CONFIG);
+const auth = firebase.auth(), db = firebase.firestore();
+const TS = () => firebase.firestore.FieldValue.serverTimestamp();
+const inc = n => firebase.firestore.FieldValue.increment(n);
+const $ = id => document.getElementById(id);
+let ref, data = null, busy = false;
+
+$("lim").textContent = LIMIT;
+$("testBanner").hidden = !TEST_MODE;
+$("rate").textContent = COINS_PER_USDT.toLocaleString();
+$("bonusAmt").textContent = BONUS;
+
+auth.onAuthStateChanged(async user => {
+  if (!user) { location.href = LOGIN_PAGE; return; }
+  ref = db.collection("wallets").doc(user.uid);
+  try {
+    const s = await ref.get();
+    if (!s.exists) {
+      await ref.set({
+        balance: 0, adsWatched: 0, adsToday: 0,
+        bonusClaimed: false, windowStart: TS(), lastAdTime: TS()
+      });
+    }
+  } catch (e) { $("msg").textContent = "Account setup error"; return; }
+  ref.onSnapshot(render);
+});
+
+function windowExpired() {
+  return data && data.windowStart && Date.now() >= data.windowStart.toMillis() + 864e5;
+}
+
+function render(s) {
+  data = s.data();
+  if (!data) return;
+  const v = TEST_MODE
+    ? { balance: +localStorage.getItem("tc") || 0, adsToday: +localStorage.getItem("ta") || 0, bonusClaimed: localStorage.getItem("tb") === "1" }
+    : { balance: data.balance, adsToday: windowExpired() ? 0 : data.adsToday, bonusClaimed: data.bonusClaimed };
+  $("bal").textContent = v.balance.toLocaleString();
+  $("usdt").textContent = (v.balance / COINS_PER_USDT).toFixed(4);
+  const today = v.adsToday;
+  $("cnt").textContent = today;
+  $("bonusBox").hidden = v.bonusClaimed;
+  $("watchBtn").disabled = busy || today >= LIMIT;
+  if (today >= LIMIT && !busy) $("msg").textContent = "Aaj ki limit poori. 24 ghante baad dobara aayein.";
+}
+
+$("claimBtn").onclick = async () => {
+  if (TEST_MODE) {
+    localStorage.setItem("tc", (+localStorage.getItem("tc") || 0) + BONUS);
+    localStorage.setItem("tb", "1");
+    $("msg").textContent = "Demo bonus mil gaya!";
+    render({ data: () => data });
+    return;
+  }
+  try {
+    await ref.update({ balance: inc(BONUS), bonusClaimed: true });
+    $("msg").textContent = "Bonus mil gaya!";
+  } catch (e) { $("msg").textContent = "Bonus claim nahi hua."; }
+};
+
+$("watchBtn").onclick = () => {
+  if (busy) return;
+  busy = true;
+  $("watchBtn").disabled = true;
+  window.open(SMARTLINK, "_blank");
+  let left = WAIT;
+  $("msg").textContent = "Ad dekhein... " + left + "s";
+  const t = setInterval(async () => {
+    left--;
+    if (left > 0) { $("msg").textContent = "Ad dekhein... " + left + "s"; return; }
+    clearInterval(t);
+    try {
+      await giveReward();
+      $("msg").textContent = (TEST_MODE ? TEST_REWARD : REWARD) + " coins add ho gaye ✅";
+    } catch (e) {
+      $("msg").textContent = "Reward nahi mila, thori der baad try karein.";
+    }
+    busy = false;
+    render({ data: () => data });
+  }, 1000);
+};
+
+async function giveReward() {
+  if (TEST_MODE) {
+    localStorage.setItem("tc", (+localStorage.getItem("tc") || 0) + TEST_REWARD);
+    localStorage.setItem("ta", (+localStorage.getItem("ta") || 0) + 1);
+    return;
+  }
+  await db.runTransaction(async tx => {
+    const s = await tx.get(ref), d = s.data();
+    const newWin = Date.now() >= d.windowStart.toMillis() + 864e5;
+    if (!newWin && d.adsToday >= LIMIT) throw new Error("limit");
+    tx.update(ref, {
+      balance: inc(REWARD),
+      adsWatched: inc(1),
+      adsToday: newWin ? 1 : inc(1),
+      windowStart: newWin ? TS() : d.windowStart,
+      lastAdTime: TS()
+    });
+  });
+}
+</script>
+</body>
+</html>
